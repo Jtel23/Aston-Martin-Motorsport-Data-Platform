@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: aston
+      POSTGRES_PASSWORD: aston
+      POSTGRES_DB: aston_martin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  f1-ingestion:
+    build: ./f1
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: aston_martin
+      DB_USER: aston
+      DB_PASSWORD: aston
+
+volumes:
+  postgres_data:
