@@ -6,14 +6,20 @@ import requests
 from psycopg.types.json import Jsonb
 
 
-# OpenF1 API endpoints
+# --------------------------------------------------
+# OPENF1 API ENDPOINTS
+# --------------------------------------------------
+
 sessions_url = "https://api.openf1.org/v1/sessions"
-laps_url = "https://api.openf1.org/v1/laps"
+drivers_url = "https://api.openf1.org/v1/drivers"
 
 
-# Request configuration
+# --------------------------------------------------
+# REQUEST CONFIGURATION
+# --------------------------------------------------
+
 max_attempts = 3
-retry_delay = 5 
+retry_delay = 5
 
 
 def fetch_openf1_data(url, params=None):
@@ -35,9 +41,12 @@ def fetch_openf1_data(url, params=None):
             )
 
             if response.status_code == 404:
-                print("No data available for this session. Skipping...")
+                print(
+                    "No data available for this request. "
+                    "Skipping..."
+                )
                 return []
-        
+
             response.raise_for_status()
 
             data = response.json()
@@ -55,7 +64,7 @@ def fetch_openf1_data(url, params=None):
             if attempt == max_attempts:
                 print(
                     "Maximum number of attempts reached. "
-                    "Request failed."
+                    "Skipping this request."
                 )
                 return []
 
@@ -73,15 +82,12 @@ def fetch_openf1_data(url, params=None):
 # 1. FETCH AVAILABLE SESSIONS
 # --------------------------------------------------
 
-print("\nFetching available OpenF1 sessions...")
-
 sessions = fetch_openf1_data(sessions_url)
 
-print(f"\nReceived {len(sessions)} sessions.")
-
-if sessions:
-    print("\nExample session:")
-    print(sessions[0])
+print(
+    f"\n{len(sessions)} sessions "
+    f"available for driver ingestion."
+)
 
 
 # --------------------------------------------------
@@ -113,40 +119,20 @@ cursor = connection.cursor()
 
 
 # --------------------------------------------------
-# 4. CREATE RAW LAPS TABLE
+# 4. CREATE RAW DRIVERS TABLE
 # --------------------------------------------------
 
 cursor.execute(
     """
-    CREATE TABLE IF NOT EXISTS openf1_laps (
+    CREATE TABLE IF NOT EXISTS openf1_drivers (
         id BIGSERIAL PRIMARY KEY,
-        payload JSONB,
+        payload JSONB NOT NULL,
         ingested_at TIMESTAMPTZ DEFAULT NOW(),
-        source TEXT
+        source TEXT,
+        session_key BIGINT,
+        meeting_key BIGINT,
+        driver_number INTEGER
     )
-    """
-)
-
-
-# Ensure lap identification columns exist
-cursor.execute(
-    """
-    ALTER TABLE openf1_laps
-    ADD COLUMN IF NOT EXISTS session_key BIGINT
-    """
-)
-
-cursor.execute(
-    """
-    ALTER TABLE openf1_laps
-    ADD COLUMN IF NOT EXISTS driver_number INTEGER
-    """
-)
-
-cursor.execute(
-    """
-    ALTER TABLE openf1_laps
-    ADD COLUMN IF NOT EXISTS lap_number INTEGER
     """
 )
 
@@ -157,11 +143,10 @@ cursor.execute(
 
 cursor.execute(
     """
-    CREATE UNIQUE INDEX IF NOT EXISTS unique_lap
-    ON openf1_laps (
+    CREATE UNIQUE INDEX IF NOT EXISTS unique_driver_session
+    ON openf1_drivers (
         session_key,
-        driver_number,
-        lap_number
+        driver_number
     )
     """
 )
@@ -200,11 +185,11 @@ for session in sessions:
 
 
     # ----------------------------------------------
-    # 8. FETCH LAPS FOR CURRENT SESSION
+    # 8. FETCH DRIVERS FOR CURRENT SESSION
     # ----------------------------------------------
 
-    laps = fetch_openf1_data(
-        laps_url,
+    drivers = fetch_openf1_data(
+        drivers_url,
         params={
             "session_key": session_key
         }
@@ -212,27 +197,27 @@ for session in sessions:
 
     print(
         f"Session {session_key}: "
-        f"{len(laps)} laps received."
+        f"{len(drivers)} drivers received."
     )
 
 
     # ----------------------------------------------
-    # 9. INSERT LAPS INTO RAW TABLE
+    # 9. INSERT DRIVERS INTO RAW TABLE
     # ----------------------------------------------
 
     session_inserted = 0
     session_skipped = 0
 
-    for lap in laps:
+    for driver in drivers:
 
         cursor.execute(
             """
-            INSERT INTO openf1_laps (
+            INSERT INTO openf1_drivers (
                 payload,
                 source,
                 session_key,
-                driver_number,
-                lap_number
+                meeting_key,
+                driver_number
             )
             VALUES (
                 %s,
@@ -243,17 +228,16 @@ for session in sessions:
             )
             ON CONFLICT (
                 session_key,
-                driver_number,
-                lap_number
+                driver_number
             )
             DO NOTHING
             """,
             (
-                Jsonb(lap),
-                "openf1_ingestion.py",
-                lap.get("session_key"),
-                lap.get("driver_number"),
-                lap.get("lap_number")
+                Jsonb(driver),
+                "openf1_drivers_ingestion.py",
+                driver.get("session_key"),
+                driver.get("meeting_key"),
+                driver.get("driver_number")
             )
         )
 
@@ -285,7 +269,7 @@ for session in sessions:
 # --------------------------------------------------
 
 print("\n======================================")
-print("OPENF1 INGESTION SUMMARY")
+print("OPENF1 DRIVERS INGESTION SUMMARY")
 print("======================================")
 
 print(
@@ -294,12 +278,12 @@ print(
 )
 
 print(
-    f"New laps inserted: "
+    f"New drivers inserted: "
     f"{total_inserted}"
 )
 
 print(
-    f"Duplicate laps skipped: "
+    f"Duplicate drivers skipped: "
     f"{total_skipped}"
 )
 
@@ -312,6 +296,6 @@ cursor.close()
 connection.close()
 
 print(
-    "\nOpenF1 ingestion "
+    "\nOpenF1 drivers ingestion "
     "completed successfully!"
 )

@@ -10,8 +10,19 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  f1-ingestion:
+  f1-laps-ingestion:
     build: ./f1
+    command: python3 src/openf1_ingestion.py
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: aston_martin
+      DB_USER: aston
+      DB_PASSWORD: aston
+
+  f1-drivers-ingestion:
+    build: ./f1
+    command: python3 src/openf1_drivers_ingestion.py
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
